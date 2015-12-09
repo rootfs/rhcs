@@ -2,7 +2,7 @@ FROM  registry.access.redhat.com/rhel7.2
 
 MAINTAINER Huamin Chen "hchen@redhat.com"
 
-LABEL Version="1.3" Description="This image has a running gluster deamon ( RHEL 7.1 + RHCS 1.3)"
+LABEL Version="1.3" Description="This image has a running Ceph daemon (RHEL 7.2 + RHCS 1.3)"
 
 ENV container docker
 
@@ -24,17 +24,14 @@ rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
 rm -f /lib/systemd/system/basic.target.wants/*;\
 rm -f /lib/systemd/system/anaconda.target.wants/*;
 
-VOLUME [ “/sys/fs/cgroup/” ]
-
-
-RUN yum -y install ceph --nogpgcheck; yum clean all;
+RUN yum -y install ceph ceph-osd --nogpgcheck; yum clean all;
 
 # Fix for the issue - https://bugzilla.redhat.com/show_bug.cgi?id=1286665
 RUN touch /etc/machine-id
 
 
 # Editing /etc/redhat-storage-server release file
-RUN echo "Red Hat Ceph Storage Server 1.3 ( Container)" > /etc/redhat-storage-release
+RUN echo "Red Hat Ceph Storage Server 1.3 (Container)" > /etc/redhat-storage-release
 
 EXPOSE 6789
 
