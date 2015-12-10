@@ -24,7 +24,7 @@ rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
 rm -f /lib/systemd/system/basic.target.wants/*;\
 rm -f /lib/systemd/system/anaconda.target.wants/*;
 
-RUN yum -y install ceph ceph-osd --nogpgcheck; yum clean all;
+RUN yum -y install ceph ceph-mon ceph-osd --nogpgcheck; yum clean all;
 
 # Fix for the issue - https://bugzilla.redhat.com/show_bug.cgi?id=1286665
 RUN touch /etc/machine-id
@@ -35,4 +35,13 @@ RUN echo "Red Hat Ceph Storage Server 1.3 (Container)" > /etc/redhat-storage-rel
 
 EXPOSE 6789
 
-ENTRYPOINT /usr/bin/sleep infinity
+# Add volumes for Ceph config and data
+VOLUME ["/etc/ceph","/var/lib/ceph", "/sys/fs/cgroup"]
+
+# Add bootstrap script
+ADD entrypoint.sh /entrypoint.sh
+ADD config.*.sh /
+
+# Execute the entrypoint
+WORKDIR /
+ENTRYPOINT ["/entrypoint.sh"]
