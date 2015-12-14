@@ -24,7 +24,7 @@ rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
 rm -f /lib/systemd/system/basic.target.wants/*;\
 rm -f /lib/systemd/system/anaconda.target.wants/*;
 
-RUN yum -y install ceph ceph-mon ceph-osd --nogpgcheck; yum clean all;
+RUN yum -y install ceph ceph-mon ceph-osd ceph-radosgw --nogpgcheck; yum clean all;
 
 # Fix for the issue - https://bugzilla.redhat.com/show_bug.cgi?id=1286665
 RUN touch /etc/machine-id
