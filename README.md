@@ -1,5 +1,9 @@
 # RHCS containerization
 
+## Clone
+
+git clone https://your_github_id:your_github_password@github.com/roofmonkey/rhcs
+
 ## build docker image
 
 ```console
