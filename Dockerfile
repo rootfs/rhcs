@@ -26,10 +26,6 @@ rm -f /lib/systemd/system/anaconda.target.wants/*;
 
 RUN yum -y install ceph ceph-mon ceph-osd --nogpgcheck; yum clean all;
 
-# Fix for the issue - https://bugzilla.redhat.com/show_bug.cgi?id=1286665
-RUN touch /etc/machine-id
-
-
 # Editing /etc/redhat-storage-server release file
 RUN echo "Red Hat Ceph Storage Server 1.3 (Container)" > /etc/redhat-storage-release
 
