@@ -29,10 +29,10 @@ RUN yum -y install ceph ceph-mon ceph-osd --nogpgcheck; yum clean all;
 # Editing /etc/redhat-storage-server release file
 RUN echo "Red Hat Ceph Storage Server 1.3 (Container)" > /etc/redhat-storage-release
 
-EXPOSE 6789
+EXPOSE 6789 6800 6801 6802 6803 6804 6805 80 5000
 
 # Add volumes for Ceph config and data
-VOLUME ["/etc/ceph","/var/lib/ceph", "/sys/fs/cgroup"]
+VOLUME ["/etc/ceph","/var/lib/ceph"]
 
 # Add bootstrap script
 ADD entrypoint.sh /entrypoint.sh
