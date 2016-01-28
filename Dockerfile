@@ -2,8 +2,6 @@ FROM  registry.access.redhat.com/rhel7.2
 
 MAINTAINER Huamin Chen "hchen@redhat.com"
 
-LABEL Version="1.3" Description="This image has a running Ceph daemon (RHEL 7.2 + RHCS 1.3)"
-
 ENV container docker
 
 # This need to be removed later
@@ -41,3 +39,9 @@ ADD config.*.sh /
 # Execute the entrypoint
 WORKDIR /
 ENTRYPOINT ["/entrypoint.sh"]
+
+# Atomic specific labels
+ADD install.sh /install.sh
+LABEL Version="1.3" Description="This image has a running Ceph daemon (RHEL 7.2 + RHCS 1.3)"
+LABEL RUN="/usr/bin/docker run -d --net=host --pid=host -e MON_IP=\${MON_IP}  -e CEPH_PUBLIC_NETWORK=\${CEPH_PUBLIC_NETWORK} -e CEPH_DAEMON=\${CEPH_DAEMON} -v /etc/ceph:/etc/ceph -v /var/lib/ceph:/var/lib/ceph \${IMAGE}"
+LABEL INSTALL="/usr/bin/docker run --rm --privileged -v /:/host --entrypoint=/install.sh \${IMAGE}"
