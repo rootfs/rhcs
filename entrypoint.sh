@@ -60,8 +60,11 @@ case "$KV_TYPE" in
    etcd|consul)
       source /config.kv.sh
       ;;
-   *)
+   static)
       source /config.static.sh
+      ;;
+   *)
+      source /config.no-gen.sh
       ;;
 esac
 
