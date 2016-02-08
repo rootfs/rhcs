@@ -56,10 +56,6 @@ ENDHERE
     # Generate the RGW bootstrap key
     ceph-authtool /var/lib/ceph/bootstrap-rgw/${CLUSTER}.keyring --create-keyring --gen-key -n client.bootstrap-rgw --cap mon 'allow profile bootstrap-rgw'
   fi
-  if [ ! -e  /etc/ceph/monmap ]; then
-    # Generate initial monitor map
-    monmaptool --create --add ${MON_NAME} "${MON_IP}:6789" --fsid ${fsid} /etc/ceph/monmap
-  fi
 }
 
 function get_config {
