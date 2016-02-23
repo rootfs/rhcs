@@ -8,8 +8,8 @@ ENV container docker
 RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
 
 RUN yum-config-manager --add=http://download.eng.blr.redhat.com/pub/rhel/released/RHEL-7/7.2/Server/x86_64/os/
-RUN yum-config-manager --add=http://download.lab.bos.redhat.com/rel-eng/RHCeph/1.3-RHEL-7/latest/Server-RH7-CEPH-MON-1.3/x86_64/os/
-RUN yum-config-manager --add=http://download.lab.bos.redhat.com/rel-eng/RHCeph/1.3-RHEL-7/latest/Server-RH7-CEPH-OSD-1.3/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-1.3-RHEL-7-20160215.0/compose/MON/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-1.3-RHEL-7-20160215.0/compose/OSD/x86_64/os/
 RUN yum-config-manager --add=http://download.eng.blr.redhat.com/pub/rhel/released/RHEL-7/7.2/Server-optional/x86_64/os/
 
 RUN yum -y update; yum clean all; \
