@@ -8,8 +8,8 @@ ENV container docker
 RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
 
 RUN yum-config-manager --add=http://puddle.ceph.redhat.com/puddles/ceph/2/latest/CEPH-2/x86_64/os/
-RUN yum-config-manager --add=http://download.lab.bos.redhat.com/pub/rhel/released/RHEL-7/7.2/Server/x86_64/os/
-RUN yum-config-manager --add=http://download.lab.bos.redhat.com/pub/rhel/released/RHEL-7/7.2/Server-optional/x86_64/os/
+RUN yum-config-manager --add=http://pulp.dist.prod.ext.phx2.redhat.com/content/dist/rhel/server/7/7Server/x86_64/os/
+
 
 RUN yum -y update; yum clean all; \
 (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == systemd-tmpfiles-setup.service ] || rm -f $i; done); \
