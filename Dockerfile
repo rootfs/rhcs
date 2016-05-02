@@ -2,6 +2,8 @@ FROM  registry.access.redhat.com/rhel7.2
 
 MAINTAINER Huamin Chen "hchen@redhat.com"
 
+ENV CEPH_VERSION jewel
+
 ENV container docker
 
 # This need to be removed later
