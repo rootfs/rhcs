@@ -2,13 +2,15 @@
 
 DIR=/srv/ceph
 VAR=/srv/ceph-var
+ETC=/etc/ceph
 IP=10.1.4.10
 NET=10.1.4.0/24
 IMAGE=rhcs
 
-rm -rf ${VAR}/* /etc/ceph/*
+rm -rf ${VAR}/* ${ETC}/*
 
-docker run -d --net=host -e MON_IP=${IP}  -e CEPH_PUBLIC_NETWORK=${NET} -e CEPH_DAEMON=mon  -v /etc/ceph:/etc/ceph -v ${VAR}:/var/lib/ceph --name mon ${IMAGE}
+docker rm -f mon
+docker run -d --net=host -e MON_IP=${IP}  -e CEPH_PUBLIC_NETWORK=${NET} -e CEPH_DAEMON=mon  -v ${ETC}:/etc/ceph -v ${VAR}:/var/lib/ceph --name mon ${IMAGE}
 
 for i in 0 1 2
 do
@@ -17,7 +19,8 @@ do
    mkfs -t xfs -f ${DIR}/d${i}
    mkdir -p /tmp/ceph_disk${i}
    mount -t xfs -o loop ${DIR}/d${i} /tmp/ceph_disk${i}
-   docker run -d --privileged --pid=host --net=host -e MON_IP=${IP}  -e CEPH_DAEMON=osd -e  OSD_TYPE=directory -v /tmp/ceph_disk${i}:/var/lib/ceph/osd/ -v ${VAR}:/var/lib/ceph -v /etc/ceph:/etc/ceph --name osd${i} ${IMAGE}
+   docker rm -f osd${i}
+   docker run -d --privileged --pid=host --net=host -e MON_IP=${IP}  -e CEPH_DAEMON=osd -e  OSD_TYPE=directory -v /tmp/ceph_disk${i}:/var/lib/ceph/osd/ -v ${VAR}:/var/lib/ceph -v ${ETC}:/etc/ceph --name osd${i} ${IMAGE}
 done
 
 
