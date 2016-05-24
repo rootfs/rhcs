@@ -595,7 +595,7 @@ CEPH_DAEMON=$(echo ${CEPH_DAEMON} |tr '[:upper:]' '[:lower:]')
 # CEPH_DAEMON variable from it
 case "$CEPH_DAEMON" in
    populate_kvstore)
-      populate_kv
+      echo "kv store is not supported"
       ;;
    mds)
       start_mds
