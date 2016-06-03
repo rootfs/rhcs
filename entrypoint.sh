@@ -31,6 +31,8 @@ set -e
 : ${KV_TYPE:=none} # valid options: consul, etcd or none
 : ${KV_IP:=127.0.0.1}
 : ${KV_PORT:=4001} # PORT 8500 for Consul
+: ${GANESHA_OPTIONS:="-N NIV_EVENT -L STDOUT"}
+: ${GANESHA_EPOCH:=''} # For restarting
 
 CEPH_OPTS="--cluster ${CLUSTER}"
 MOUNT_OPTS="-t xfs -o noatime,inode64"
@@ -584,6 +586,33 @@ ENDHERE
 
 }
 
+###########
+# GANESHA #
+###########
+
+function start_rpc {
+  rpcbind || return 0
+  rpc.statd -L || return 0
+  rpc.idmapd || return 0
+
+}
+
+function start_nfs {
+  get_config
+  check_config
+
+  # Ensure we have the admin key
+  #get_admin_key
+  #check_admin_key
+
+  # Init RPC
+  start_rpc
+
+  # start nfs
+  exec /usr/bin/ganesha.nfsd -F ${GANESHA_OPTIONS} ${GANESHA_EPOCH}
+
+}
+
 ###############
 # CEPH_DAEMON #
 ###############
@@ -632,12 +661,15 @@ case "$CEPH_DAEMON" in
    restapi)
       start_restapi
       ;;
+   nfs)
+      start_nfs
+      ;;
    *)
       if [ ! -n "$CEPH_DAEMON" ]; then
           echo "ERROR- One of CEPH_DAEMON or a daemon parameter must be defined as the name "
           echo "of the daemon you want to deploy."
-          echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI"
-          echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi"
+          echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI, NFS"
+          echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi, nfs"
           exit 1
       fi
       ;;
