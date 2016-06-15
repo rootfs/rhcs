@@ -13,8 +13,6 @@ RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-
 RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160606.0/compose/OSD/x86_64/os/
 RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160606.0/compose/Tools/x86_64/os/
 RUN yum-config-manager --add=http://pulp.dist.prod.ext.phx2.redhat.com/content/dist/rhel/server/7/7Server/x86_64/os/
-RUN rpm -Uvh http://download.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-6.noarch.rpm
-RUN yum-config-manager --add=http://puddle.ceph.redhat.com/puddles/ceph/2/latest/CEPH-2/x86_64/os/
 
 
 RUN yum -y update; yum clean all; \
@@ -27,7 +25,7 @@ rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
 rm -f /lib/systemd/system/basic.target.wants/*;\
 rm -f /lib/systemd/system/anaconda.target.wants/*;
 
-RUN yum -y install ceph ceph-mon ceph-osd nfs-ganesha-ceph --nogpgcheck; yum clean all
+RUN yum -y install ceph ceph-mon ceph-osd --nogpgcheck; yum clean all
 
 # Editing /etc/redhat-storage-server release file
 RUN echo "Red Hat Ceph Storage Server 2.0 (Container)" > /etc/redhat-storage-release
