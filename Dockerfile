@@ -9,9 +9,9 @@ ENV container docker
 # This need to be removed later
 RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
 
-RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160606.0/compose/MON/x86_64/os/
-RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160606.0/compose/OSD/x86_64/os/
-RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160606.0/compose/Tools/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160617.2/compose/MON/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160617.2/compose/OSD/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160617.2/compose/Tools/x86_64/os/
 RUN yum-config-manager --add=http://pulp.dist.prod.ext.phx2.redhat.com/content/dist/rhel/server/7/7Server/x86_64/os/
 
 
