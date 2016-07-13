@@ -613,6 +613,20 @@ function start_nfs {
 
 }
 
+##############
+# ZAP DEVICE #
+##############
+
+function zap_device {
+  if [[ -z ${OSD_DEVICE} ]]; then
+    echo "Please provide a device to zap!"
+    echo "ie: '-e OSD_DEVICE=/dev/sdb'"
+    exit 1
+  else
+    ceph-disk -v zap ${OSD_DEVICE}
+  fi
+}
+
 ###############
 # CEPH_DAEMON #
 ###############
@@ -660,6 +674,9 @@ case "$CEPH_DAEMON" in
       ;;
    restapi)
       start_restapi
+      ;;
+   zap_device)
+      zap_device
       ;;
    nfs)
       start_nfs
