@@ -7,7 +7,7 @@ set -e
 : ${CEPH_GET_ADMIN_KEY:=0}
 : ${HOSTNAME:=$(hostname -s)}
 : ${MON_NAME:=${HOSTNAME}}
-: ${MON_IP_AUTO_DETECT:=0}
+: ${NETWORK_AUTO_DETECT:=0}
 : ${MDS_NAME:=mds-${HOSTNAME}}
 : ${OSD_FORCE_ZAP:=0}
 : ${OSD_JOURNAL_SIZE:=100}
@@ -19,7 +19,7 @@ set -e
 : ${CEPHFS_METADATA_POOL:=${CEPHFS_NAME}_metadata}
 : ${CEPHFS_METADATA_POOL_PG:=8}
 : ${RGW_NAME:=${HOSTNAME}}
-: ${RGW_CIVETWEB_PORT:=80}
+: ${RGW_CIVETWEB_PORT:=8080}
 : ${RGW_REMOTE_CGI:=0}
 : ${RGW_REMOTE_CGI_PORT:=9000}
 : ${RGW_REMOTE_CGI_HOST:=0.0.0.0}
@@ -31,8 +31,11 @@ set -e
 : ${KV_TYPE:=none} # valid options: consul, etcd or none
 : ${KV_IP:=127.0.0.1}
 : ${KV_PORT:=4001} # PORT 8500 for Consul
+: ${GANESHA_OPTIONS:="-N NIV_EVENT -L STDOUT"}
+: ${GANESHA_EPOCH:=''} # For restarting
 
 CEPH_OPTS="--cluster ${CLUSTER}"
+MOUNT_OPTS="-t xfs -o noatime,inode64"
 
 # ceph config file exists or die
 function check_config {
@@ -50,6 +53,22 @@ if [[ ! -e /etc/ceph/${CLUSTER}.client.admin.keyring ]]; then
 fi
 }
 
+# create socket directory
+function create_socket_dir {
+mkdir -p /var/run/ceph
+chown ceph. /var/run/ceph
+}
+
+# Calculate proper device names, given a device and partition number
+function dev_part {
+  if [[ "${1:0-1:1}" == [0-9] ]]; then
+    echo "${1}p${2}"
+  else
+    echo "${1}${2}"
+  fi
+}
+
+
 ###########################
 # Configuration generator #
 ###########################
@@ -60,38 +79,83 @@ case "$KV_TYPE" in
    etcd|consul)
       source /config.kv.sh
       ;;
-   static)
-      source /config.static.sh
-      ;;
    *)
-      source /config.no-gen.sh
+      source /config.static.sh
       ;;
 esac
 
+##########
+# CONFIG #
+##########
+function kv {
+	# Note the 'cas' command puts a value in the KV store if it is empty
+	KEY="$1"
+	shift
+	VALUE="$*"
+	echo "adding key ${KEY} with value ${VALUE} to KV store"
+	kviator --kvstore=${KV_TYPE} --client=${KV_IP}:${KV_PORT} cas ${CLUSTER_PATH}"${KEY}" "${VALUE}" || echo "value is already set"
+}
+
+function populate_kv {
+    CLUSTER_PATH=ceph-config/${CLUSTER}
+    case "$KV_TYPE" in
+       etcd|consul)
+          # if ceph.defaults found in /etc/ceph/ use that
+          if [[ -e "/etc/ceph/ceph.defaults" ]]; then
+            DEFAULTS_PATH="/etc/ceph/ceph.defaults"
+          else
+          # else use defaults
+            DEFAULTS_PATH="/ceph.defaults"
+          fi
+          # read defaults file, grab line with key<space>value without comment #
+          cat "$DEFAULTS_PATH" | grep '^.* .*' | grep -v '#' | while read line; do
+            kv `echo $line`
+          done
+          ;;
+       *)
+          ;;
+    esac
+}
 
 #######
 # MON #
 #######
 
 function start_mon {
-  if [ ! -n "$CEPH_PUBLIC_NETWORK" ]; then
+  if [[ ! -n "$CEPH_PUBLIC_NETWORK" && ${NETWORK_AUTO_DETECT} -eq 0 ]]; then
     echo "ERROR- CEPH_PUBLIC_NETWORK must be defined as the name of the network for the OSDs"
     exit 1
   fi
 
-  if [ ${MON_IP_AUTO_DETECT} -eq 1 ]; then
-    MON_IP=$(ip -6 -o a | grep scope.global | awk '/eth/ { sub ("/..", "", $4); print $4 }' | head -n1)
-    if [ -z "$MON_IP" ]; then
-      MON_IP=$(ip -4 -o a | awk '/eth/ { sub ("/..", "", $4); print $4 }')
-    fi
-  elif [ ${MON_IP_AUTO_DETECT} -eq 4 ]; then
-    MON_IP=$(ip -4 -o a | awk '/eth/ { sub ("/..", "", $4); print $4 }')
-  elif [ ${MON_IP_AUTO_DETECT} -eq 6 ]; then
-    MON_IP=$(ip -6 -o a | grep scope.global | awk '/eth/ { sub ("/..", "", $4); print $4 }' | head -n1)
+  if [[ ! -n "$MON_IP" && ${NETWORK_AUTO_DETECT} -eq 0 ]]; then
+    echo "ERROR- MON_IP must be defined as the IP address of the monitor"
+    exit 1
   fi
 
-  if [ ! -n "$MON_IP" ]; then
-    echo "ERROR- MON_IP must be defined as the IP address of the monitor"
+  if [ ${NETWORK_AUTO_DETECT} -ne 0 ]; then
+    if [ -x $(command -v ip) ]; then
+      if [ ${NETWORK_AUTO_DETECT} -eq 1 ]; then
+        MON_IP=$(ip -6 -o a | grep scope.global | awk '/eth/ { sub ("/..", "", $4); print $4 }' | head -n1)
+        if [ -z "$MON_IP" ]; then
+          MON_IP=$(ip -4 -o a | awk '/eth/ { sub ("/..", "", $4); print $4 }')
+          CEPH_PUBLIC_NETWORK=$(ip r | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' | head -1)
+        fi
+      elif [ ${NETWORK_AUTO_DETECT} -eq 4 ]; then
+        MON_IP=$(ip -4 -o a | awk '/eth/ { sub ("/..", "", $4); print $4 }')
+        CEPH_PUBLIC_NETWORK=$(ip r | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' | head -1)
+      elif [ ${NETWORK_AUTO_DETECT} -eq 6 ]; then
+        MON_IP=$(ip -6 -o a | grep scope.global | awk '/eth/ { sub ("/..", "", $4); print $4 }' | head -n1)
+        CEPH_PUBLIC_NETWORK=$(ip r | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' | head -1)
+      fi
+    # best effort, only works with ipv4
+    else
+      MON_IP=$(grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' /proc/net/fib_trie | grep -vE "^127|255$|0$")
+      CEPH_PUBLIC_NETWORK=$(grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/[0-9]\{1,2\}' /proc/net/fib_trie | grep -vE "^127|0$" | head -1)
+    fi
+  fi
+
+  if [[ -z "$MON_IP" || -z "$CEPH_PUBLIC_NETWORK" ]]; then
+    echo "ERROR- it looks like we have not been able to discover the network settings"
     exit 1
   fi
 
@@ -107,10 +171,9 @@ function start_mon {
       exit 1
     fi
 
-    monmapOpt="--monmap /etc/ceph/monmap"
     if [ ! -e /etc/ceph/monmap ]; then
-      echo "/etc/ceph/monmap must exist.  You can extract it from your current monitor by running 'ceph mon getmap -o /etc/ceph/monmap' or use a KV Store"
-      monmapOpt=""
+      echo "ERROR- /etc/ceph/monmap must exist.  You can extract it from your current monitor by running 'ceph mon getmap -o /etc/ceph/monmap' or use a KV Store"
+      exit 1
     fi
 
     # Testing if it's not the first monitor, if one key doesn't exist we assume none of them exist
@@ -119,19 +182,23 @@ function start_mon {
     ceph-authtool /tmp/${CLUSTER}.mon.keyring --import-keyring /var/lib/ceph/bootstrap-mds/${CLUSTER}.keyring
     ceph-authtool /tmp/${CLUSTER}.mon.keyring --import-keyring /var/lib/ceph/bootstrap-rgw/${CLUSTER}.keyring
     ceph-authtool /tmp/${CLUSTER}.mon.keyring --import-keyring /etc/ceph/${CLUSTER}.mon.keyring
+    chown ceph. /tmp/${CLUSTER}.mon.keyring
 
     # Make the monitor directory
     mkdir -p /var/lib/ceph/mon/${CLUSTER}-${MON_NAME}
+    chown ceph. /var/lib/ceph/mon/${CLUSTER}-${MON_NAME}
+
+    create_socket_dir
 
     # Prepare the monitor daemon's directory with the map and keyring
-    ceph-mon --mkfs -i ${MON_NAME} ${monmapOpt} --keyring /tmp/${CLUSTER}.mon.keyring
+    ceph-mon --setuser ceph --setgroup ceph --mkfs -i ${MON_NAME} --monmap /etc/ceph/monmap --keyring /tmp/${CLUSTER}.mon.keyring --mon-data /var/lib/ceph/mon/${CLUSTER}-${MON_NAME}
 
     # Clean up the temporary key
     rm /tmp/${CLUSTER}.mon.keyring
   fi
 
   # start MON
-  exec /usr/bin/ceph-mon ${CEPH_OPTS} -d -i ${MON_NAME} --public-addr "${MON_IP}:6789"
+  exec /usr/bin/ceph-mon ${CEPH_OPTS} -d -i ${MON_NAME} --public-addr "${MON_IP}:6789" --setuser ceph --setgroup ceph
 }
 
 
@@ -142,6 +209,7 @@ function start_mon {
 function start_osd {
    get_config
    check_config
+   create_socket_dir
 
    if [ ${CEPH_GET_ADMIN_KEY} -eq "1" ]; then
      get_admin_key
@@ -155,11 +223,14 @@ function start_osd {
       disk)
          osd_disk
          ;;
+      prepare)
+         osd_disk_prepare
+         ;;
       activate)
          osd_activate
          ;;
-      prepare)
-         osd_disk_prepare
+      activate_journal)
+         osd_activate_journal
          ;;
       *)
          if [[ ! -d /var/lib/ceph/osd || -n "$(find /var/lib/ceph/osd -prune -empty)" ]]; then
@@ -185,15 +256,18 @@ function start_osd {
 
 function osd_directory {
   if [[ ! -d /var/lib/ceph/osd ]]; then
-    echo "ERROR- could not find any OSD, did you bind mount the OSD data directory?"
-    echo "ERROR- use -v <host_osd_data_dir>:<container_osd_data_dir>"
+    echo "ERROR- could not find the osd directory, did you bind mount the OSD data directory?"
+    echo "ERROR- use -v <host_osd_data_dir>:/var/lib/ceph/osd"
     exit 1
   fi
 
+  # make sure ceph owns the directory
+  chown ceph. /var/lib/ceph/osd
+
   # check if anything is there, if not create an osd with directory
   if [[ -n "$(find /var/lib/ceph/osd -prune -empty)" ]]; then
-    echo "Creating osd with ceph osd create"
-    OSD_ID=$(ceph osd create)
+    echo "Creating osd with ceph --cluster ${CLUSTER} osd create"
+    OSD_ID=$(ceph --cluster ${CLUSTER} osd create)
     if [ "$OSD_ID" -eq "$OSD_ID" ] 2>/dev/null; then
         echo "OSD created with ID: ${OSD_ID}"
     else
@@ -201,17 +275,20 @@ function osd_directory {
       exit 1
     fi
 
-    # create the folder
+    # create the folder and own it
     mkdir -p /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}
+    chown ceph. /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}
     echo "created folder /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}"
   fi
 
   for OSD_ID in $(ls /var/lib/ceph/osd |  awk 'BEGIN { FS = "-" } ; { print $2 }'); do
     if [ -n "${JOURNAL_DIR}" ]; then
        OSD_J="${JOURNAL_DIR}/journal.${OSD_ID}"
+       chown -R ceph. ${JOURNAL_DIR}
     else
        if [ -n "${JOURNAL}" ]; then
           OSD_J=${JOURNAL}
+          chown -R ceph. $(dirname ${JOURNAL_DIR})
        else
           OSD_J=/var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/journal
        fi
@@ -219,17 +296,22 @@ function osd_directory {
 
     # Check to see if our OSD has been initialized
     if [ ! -e /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring ]; then
+      chown ceph. /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}
       # Create OSD key and file structure
-      ceph-osd ${CEPH_OPTS} -i $OSD_ID --mkfs --mkkey --mkjournal --osd-journal ${OSD_J}
+      ceph-osd ${CEPH_OPTS} -i $OSD_ID --mkfs --mkkey --mkjournal --osd-journal ${OSD_J} --setuser ceph --setgroup ceph
 
       if [ ! -e /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring ]; then
-        ceph auth get client.bootstrap-osd -o /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring
+        echo "ERROR- /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring must exist. You can extract it from your current monitor by running 'ceph auth get client.bootstrap-osd -o /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring'"
+        exit 1
       fi
 
       timeout 10 ceph ${CEPH_OPTS} --name client.bootstrap-osd --keyring /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring health || exit 1
 
       # Add the OSD key
-      ceph ${CEPH_OPTS} --name client.bootstrap-osd --keyring /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring auth add osd.${OSD_ID} -i /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring osd 'allow *' mon 'allow profile osd'
+      ceph ${CEPH_OPTS} --name client.bootstrap-osd --keyring /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring auth add osd.${OSD_ID} -i /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring osd 'allow *' mon 'allow profile osd'  || echo $1
+      echo "done adding key"
+      chown ceph. /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring
+      chmod 0600 /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring
 
       # Add the OSD to the CRUSH map
       if [ ! -n "${HOSTNAME}" ]; then
@@ -240,12 +322,11 @@ function osd_directory {
       ceph ${CEPH_OPTS} --name=osd.${OSD_ID} --keyring=/var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring osd crush create-or-move -- ${OSD_ID} ${OSD_WEIGHT} ${CRUSH_LOCATION}
     fi
 
-    #TODO: use systemd instead
-    #service ceph start osd
-    exec ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID} --osd-journal ${OSD_J} -k /var/lib/ceph/osd/ceph-${OSD_ID}/keyring
+    mkdir -p /etc/service/${CLUSTER}-${OSD_ID}
+    echo "store-daemon: starting daemon on ${HOSTNAME}..."
+    exec ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID} --osd-journal ${OSD_J} -k /var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring
+
   done
-
-
 }
 
 #########################
@@ -266,6 +347,7 @@ function osd_disk_prepare {
   timeout 10 ceph ${CEPH_OPTS} --name client.bootstrap-osd --keyring /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring health || exit 1
 
   mkdir -p /var/lib/ceph/osd
+  chown ceph. /var/lib/ceph/osd
 
   # TODO:
   # -  add device format check (make sure only one device is passed
@@ -279,20 +361,21 @@ function osd_disk_prepare {
 
   if [[ ! -z "${OSD_JOURNAL}" ]]; then
     ceph-disk -v prepare ${OSD_DEVICE} ${OSD_JOURNAL}
+    chown ceph. ${OSD_JOURNAL}
   else
     ceph-disk -v prepare ${OSD_DEVICE}
+    chown ceph. $(dev_part ${OSD_DEVICE} 2)
   fi
 }
+
 
 #################
 # OSD_CEPH_DISK #
 #################
-
 function osd_disk {
   osd_disk_prepare
   osd_activate
 }
-
 
 ##########################
 # OSD_CEPH_DISK_ACTIVATE #
@@ -303,22 +386,71 @@ function osd_activate {
     echo "ERROR- You must provide a device to build your OSD ie: /dev/sdb"
     exit 1
   fi
-  timeout 10  bash -c "while [ ! -e ${OSD_DEVICE}1 ]; do sleep 1; done"
+
+  # wait till partition exists
+  if [[ ! -z "${OSD_JOURNAL}" ]]; then
+    timeout 10  bash -c "while [ ! -e ${OSD_DEVICE} ]; do sleep 1; done"
+  else
+    timeout 10  bash -c "while [ ! -e $(dev_part ${OSD_DEVICE} 1) ]; do sleep 1; done"
+  fi
   mkdir -p /var/lib/ceph/osd
-  ceph-disk -v activate ${OSD_DEVICE}1
+  chown ceph. /var/lib/ceph/osd
+  if [[ ! -z "${OSD_JOURNAL}" ]]; then
+    chown ceph. ${OSD_JOURNAL}
+    ceph-disk -v --setuser ceph --setgroup disk activate $(dev_part ${OSD_DEVICE} 1)
+  else
+    chown ceph. $(dev_part ${OSD_DEVICE} 2)
+    ceph-disk -v --setuser ceph --setgroup disk activate $(dev_part ${OSD_DEVICE} 1)
+  fi
   OSD_ID=$(cat /var/lib/ceph/osd/$(ls -ltr /var/lib/ceph/osd/ | tail -n1 | awk -v pattern="$CLUSTER" '$0 ~ pattern {print $9}')/whoami)
   OSD_WEIGHT=$(df -P -k /var/lib/ceph/osd/${CLUSTER}-$OSD_ID/ | tail -1 | awk '{ d= $2/1073741824 ; r = sprintf("%.2f", d); print r }')
   ceph ${CEPH_OPTS} --name=osd.${OSD_ID} --keyring=/var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring osd crush create-or-move -- ${OSD_ID} ${OSD_WEIGHT} ${CRUSH_LOCATION}
 
   # ceph-disk activiate has exec'ed /usr/bin/ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID}
-  # wait till ceph-osd exit
+  # wait till docker stop or ceph-osd is killed
   OSD_PID=$(ps -ef |grep ceph-osd |grep osd.${OSD_ID} |awk '{print $2}')
-  if [ ! -z ${OSD_ID} ]; then
+  if [ -n "${OSD_PID}" ]; then
+      echo "OSD (PID ${OSD_PID}) is running, waiting till it exits"
       while [ -e /proc/${OSD_PID} ]; do sleep 1;done
   else
-      exec /usr/bin/ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID}
+      exec /usr/bin/ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID} --setuser ceph --setgroup disk
   fi
 }
+
+
+##########################
+# OSD_ACTIVATE_JOURNAL   #
+##########################
+
+function osd_activate_journal {
+  if [[ -z "${OSD_JOURNAL}" ]];then
+    echo "ERROR- You must provide a device to build your OSD journal ie: /dev/sdb2"
+    exit 1
+  fi
+
+  # wait till partition exists
+  timeout 10  bash -c "while [ ! -e ${OSD_JOURNAL} ]; do sleep 1; done"
+
+  mkdir -p /var/lib/ceph/osd
+  chown ceph. /var/lib/ceph/osd
+  chown ceph. ${OSD_JOURNAL}
+  ceph-disk -v --setuser ceph --setgroup disk activate-journal ${OSD_JOURNAL}
+
+  OSD_ID=$(cat /var/lib/ceph/osd/$(ls -ltr /var/lib/ceph/osd/ | tail -n1 | awk -v pattern="$CLUSTER" '$0 ~ pattern {print $9}')/whoami)
+  OSD_WEIGHT=$(df -P -k /var/lib/ceph/osd/${CLUSTER}-$OSD_ID/ | tail -1 | awk '{ d= $2/1073741824 ; r = sprintf("%.2f", d); print r }')
+  ceph ${CEPH_OPTS} --name=osd.${OSD_ID} --keyring=/var/lib/ceph/osd/${CLUSTER}-${OSD_ID}/keyring osd crush create-or-move -- ${OSD_ID} ${OSD_WEIGHT} ${CRUSH_LOCATION}
+
+  # ceph-disk activiate has exec'ed /usr/bin/ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID}
+  # wait till docker stop or ceph-osd is killed
+  OSD_PID=$(ps -ef |grep ceph-osd |grep osd.${OSD_ID} |awk '{print $2}')
+  if [ -n "${OSD_PID}" ]; then
+      echo "OSD (PID ${OSD_PID}) is running, waiting till it exits"
+      while [ -e /proc/${OSD_PID} ]; do sleep 1;done
+  else
+      exec /usr/bin/ceph-osd ${CEPH_OPTS} -f -d -i ${OSD_ID} --setuser ceph --setgroup disk
+  fi
+}
+
 
 #######
 # MDS #
@@ -327,11 +459,13 @@ function osd_activate {
 function start_mds {
   get_config
   check_config
+  create_socket_dir
 
   # Check to see if we are a new MDS
   if [ ! -e /var/lib/ceph/mds/${CLUSTER}-${MDS_NAME}/keyring ]; then
 
      mkdir -p /var/lib/ceph/mds/${CLUSTER}-${MDS_NAME}
+     chown ceph. /var/lib/ceph/mds/${CLUSTER}-${MDS_NAME}
 
     if [ -e /etc/ceph/${CLUSTER}.client.admin.keyring ]; then
        KEYRING_OPT="--name client.admin --keyring /etc/ceph/${CLUSTER}.client.admin.keyring"
@@ -346,6 +480,8 @@ function start_mds {
 
     # Generate the MDS key
     ceph ${CEPH_OPTS} $KEYRING_OPT auth get-or-create mds.$MDS_NAME osd 'allow rwx' mds 'allow' mon 'allow profile mds' -o /var/lib/ceph/mds/${CLUSTER}-${MDS_NAME}/keyring
+    chown ceph. /var/lib/ceph/mds/${CLUSTER}-${MDS_NAME}/keyring
+    chmod 600 /var/lib/ceph/mds/${CLUSTER}-${MDS_NAME}/keyring
 
   fi
 
@@ -376,7 +512,7 @@ function start_mds {
   fi
 
   # NOTE: prefixing this with exec causes it to die (commit suicide)
-  /usr/bin/ceph-mds ${CEPH_OPTS} -d -i ${MDS_NAME}
+  /usr/bin/ceph-mds ${CEPH_OPTS} -d -i ${MDS_NAME} --setuser ceph --setgroup ceph
 }
 
 
@@ -397,6 +533,7 @@ function start_rgw {
   if [ ! -e /var/lib/ceph/radosgw/${RGW_NAME}/keyring ]; then
 
     mkdir -p /var/lib/ceph/radosgw/${RGW_NAME}
+    chown ceph. /var/lib/ceph/radosgw/${RGW_NAME}
 
     if [ ! -e /var/lib/ceph/bootstrap-rgw/${CLUSTER}.keyring ]; then
       echo "ERROR- /var/lib/ceph/bootstrap-rgw/${CLUSTER}.keyring must exist. You can extract it from your current monitor by running 'ceph auth get client.bootstrap-rgw -o /var/lib/ceph/bootstrap-rgw/${CLUSTER}.keyring'"
@@ -407,12 +544,15 @@ function start_rgw {
 
     # Generate the RGW key
     ceph ${CEPH_OPTS} --name client.bootstrap-rgw --keyring /var/lib/ceph/bootstrap-rgw/${CLUSTER}.keyring auth get-or-create client.rgw.${RGW_NAME} osd 'allow rwx' mon 'allow rw' -o /var/lib/ceph/radosgw/${RGW_NAME}/keyring
+    chown ceph. /var/lib/ceph/radosgw/${RGW_NAME}/keyring
+    chmod 0600 /var/lib/ceph/radosgw/${RGW_NAME}/keyring
+    create_socket_dir
   fi
 
   if [ "$RGW_REMOTE_CGI" -eq 1 ]; then
-    /usr/bin/radosgw -d ${CEPH_OPTS} -n client.rgw.${RGW_NAME} -k /var/lib/ceph/radosgw/$RGW_NAME/keyring --rgw-socket-path="" --rgw-frontends="fastcgi socket_port=$RGW_REMOTE_CGI_PORT socket_host=$RGW_REMOTE_CGI_HOST"
+    /usr/bin/radosgw -d ${CEPH_OPTS} -n client.rgw.${RGW_NAME} -k /var/lib/ceph/radosgw/$RGW_NAME/keyring --rgw-socket-path="" --rgw-frontends="fastcgi socket_port=$RGW_REMOTE_CGI_PORT socket_host=$RGW_REMOTE_CGI_HOST" --setuser ceph --setgroup ceph
   else
-    /usr/bin/radosgw -d ${CEPH_OPTS} -n client.rgw.${RGW_NAME} -k /var/lib/ceph/radosgw/$RGW_NAME/keyring --rgw-socket-path="" --rgw-frontends="civetweb port=$RGW_CIVETWEB_PORT"
+    /usr/bin/radosgw -d ${CEPH_OPTS} -n client.rgw.${RGW_NAME} -k /var/lib/ceph/radosgw/$RGW_NAME/keyring --rgw-socket-path="" --rgw-frontends="civetweb port=$RGW_CIVETWEB_PORT" --setuser ceph --setgroup ceph
   fi
 }
 
@@ -446,6 +586,33 @@ ENDHERE
 
 }
 
+###########
+# GANESHA #
+###########
+
+function start_rpc {
+  rpcbind || return 0
+  rpc.statd -L || return 0
+  rpc.idmapd || return 0
+
+}
+
+function start_nfs {
+  get_config
+  check_config
+
+  # Ensure we have the admin key
+  #get_admin_key
+  #check_admin_key
+
+  # Init RPC
+  start_rpc
+
+  # start nfs
+  exec /usr/bin/ganesha.nfsd -F ${GANESHA_OPTIONS} ${GANESHA_EPOCH}
+
+}
+
 ###############
 # CEPH_DAEMON #
 ###############
@@ -456,6 +623,9 @@ CEPH_DAEMON=$(echo ${CEPH_DAEMON} |tr '[:upper:]' '[:lower:]')
 # If we are given a valid first argument, set the
 # CEPH_DAEMON variable from it
 case "$CEPH_DAEMON" in
+   populate_kvstore)
+      echo "kv store is not supported"
+      ;;
    mds)
       start_mds
       ;;
@@ -481,18 +651,25 @@ case "$CEPH_DAEMON" in
       OSD_TYPE="activate"
       start_osd
       ;;
+    osd_ceph_activate_journal)
+      OSD_TYPE="activate_journal"
+      start_osd
+      ;;
    rgw)
       start_rgw
       ;;
    restapi)
       start_restapi
       ;;
+   nfs)
+      start_nfs
+      ;;
    *)
       if [ ! -n "$CEPH_DAEMON" ]; then
           echo "ERROR- One of CEPH_DAEMON or a daemon parameter must be defined as the name "
           echo "of the daemon you want to deploy."
-          echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, MDS, RGW, RESTAPI"
-          echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, mds, rgw, restapi"
+          echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI, NFS"
+          echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi, nfs"
           exit 1
       fi
       ;;
