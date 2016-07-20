@@ -68,9 +68,32 @@ function dev_part {
   fi
 }
 
+function osd_trying_to_determine_scenario {
+  if [[ ! -d /var/lib/ceph/osd || -n "$(find /var/lib/ceph/osd -prune -empty)" ]]; then
+    echo "No bootstrapped OSDs found; trying ceph-disk"
+    osd_disk
+    return
+  fi
+
+  if [ -z "${OSD_DEVICE}" ]; then
+    echo "Bootstrapped OSD(s) found; using OSD directory"
+    osd_directory
+    return
+  fi
+
+  if $(parted --script ${OSD_DEVICE} print | egrep -sq '^ 1.*ceph data'); then
+    echo "Bootstrapped OSD found; activating ${OSD_DEVICE}"
+    osd_activate
+  else
+    echo "Device detected, assuming ceph-disk scenario is desired"
+    echo "Preparing and activating ${OSD_DEVICE}"
+    osd_disk
+  fi
+}
+
 
 ###########################
-# Configuration generator #
+# CONFIGURATION GENERATOR #
 ###########################
 
 # Load in the bootstrapping routines
@@ -83,6 +106,7 @@ case "$KV_TYPE" in
       source /config.static.sh
       ;;
 esac
+
 
 ##########
 # CONFIG #
@@ -116,6 +140,7 @@ function populate_kv {
           ;;
     esac
 }
+
 
 #######
 # MON #
@@ -207,46 +232,35 @@ function start_mon {
 ################
 
 function start_osd {
-   get_config
-   check_config
-   create_socket_dir
+  get_config
+  check_config
+  create_socket_dir
 
-   if [ ${CEPH_GET_ADMIN_KEY} -eq "1" ]; then
-     get_admin_key
-     check_admin_key
-   fi
+  if [ ${CEPH_GET_ADMIN_KEY} -eq "1" ]; then
+    get_admin_key
+    check_admin_key
+  fi
 
-   case "$OSD_TYPE" in
-      directory)
-         osd_directory
-         ;;
-      disk)
-         osd_disk
-         ;;
-      prepare)
-         osd_disk_prepare
-         ;;
-      activate)
-         osd_activate
-         ;;
-      activate_journal)
-         osd_activate_journal
-         ;;
-      *)
-         if [[ ! -d /var/lib/ceph/osd || -n "$(find /var/lib/ceph/osd -prune -empty)" ]]; then
-            echo "No bootstrapped OSDs found; trying ceph-disk"
-            osd_disk
-         else
-            if [ -z "${OSD_DEVICE}" ]; then
-                echo "Bootstrapped OSD(s) found; using OSD directory"
-                osd_directory
-            else
-                echo "Bootstrapped OSD(s) found; using ${OSD_DEVICE}"
-                osd_activate
-            fi
-         fi
-         ;;
-   esac
+  case "$OSD_TYPE" in
+    directory)
+      osd_directory
+      ;;
+    disk)
+      osd_disk
+      ;;
+    prepare)
+      osd_disk_prepare
+      ;;
+    activate)
+      osd_activate
+      ;;
+    activate_journal)
+      osd_activate_journal
+      ;;
+    *)
+      osd_trying_to_determine_scenario
+      ;;
+  esac
 }
 
 
@@ -329,6 +343,7 @@ function osd_directory {
   done
 }
 
+
 #########################
 # OSD_CEPH_DISK_PREPARE #
 #########################
@@ -340,7 +355,7 @@ function osd_disk_prepare {
   fi
 
   if [ ! -e /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring ]; then
-    echo "ERROR- /var/lib/ceph/bootstrap-ods/${CLUSTER}.keyring must exist. You can extract it from your current monitor by running 'ceph auth get client.bootstrap-ods -o /var/lib/ceph/bootstrap-ods/${CLUSTER}.keyring'"
+    echo "ERROR- /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring must exist. You can extract it from your current monitor by running 'ceph auth get client.bootstrap-osd -o /var/lib/ceph/bootstrap-osd/${CLUSTER}.keyring'"
     exit 1
   fi
 
@@ -353,9 +368,11 @@ function osd_disk_prepare {
   # -  add device format check (make sure only one device is passed
 
   if [[ "$(parted --script ${OSD_DEVICE} print | egrep '^ 1.*ceph data')" && ${OSD_FORCE_ZAP} -ne "1" ]]; then
-    echo "ERROR- It looks like this device is an OSD, set OSD_FORCE_ZAP=1 to use this device anyway and zap its content"
+    echo "ERROR- It looks like ${OSD_DEVICE} is an OSD, set OSD_FORCE_ZAP=1 to use this device anyway and zap its content"
+    echo "You can also use the zap_device scenario on the appropriate device to zap it"
     exit 1
   elif [[ "$(parted --script ${OSD_DEVICE} print | egrep '^ 1.*ceph data')" && ${OSD_FORCE_ZAP} -eq "1" ]]; then
+    echo "It looks like ${OSD_DEVICE} is an OSD, however OSD_FORCE_ZAP is enabled so we are zapping the device anyway"
     ceph-disk -v zap ${OSD_DEVICE}
   fi
 
@@ -376,6 +393,7 @@ function osd_disk {
   osd_disk_prepare
   osd_activate
 }
+
 
 ##########################
 # OSD_CEPH_DISK_ACTIVATE #
@@ -613,6 +631,22 @@ function start_nfs {
 
 }
 
+
+##############
+# ZAP DEVICE #
+##############
+
+function zap_device {
+  if [[ -z ${OSD_DEVICE} ]]; then
+    echo "Please provide a device to zap!"
+    echo "ie: '-e OSD_DEVICE=/dev/sdb'"
+    exit 1
+  else
+    ceph-disk -v zap ${OSD_DEVICE}
+  fi
+}
+
+
 ###############
 # CEPH_DAEMON #
 ###############
@@ -623,56 +657,59 @@ CEPH_DAEMON=$(echo ${CEPH_DAEMON} |tr '[:upper:]' '[:lower:]')
 # If we are given a valid first argument, set the
 # CEPH_DAEMON variable from it
 case "$CEPH_DAEMON" in
-   populate_kvstore)
-      echo "kv store is not supported"
-      ;;
-   mds)
-      start_mds
-      ;;
-   mon)
-      start_mon
-      ;;
-   osd)
-      start_osd
-      ;;
-   osd_directory)
-      OSD_TYPE="directory"
-      start_osd
-      ;;
-   osd_ceph_disk)
-      OSD_TYPE="disk"
-      start_osd
-      ;;
-   osd_ceph_disk_prepare)
-      OSD_TYPE="prepare"
-      start_osd
-      ;;
-   osd_ceph_disk_activate)
-      OSD_TYPE="activate"
-      start_osd
-      ;;
-    osd_ceph_activate_journal)
-      OSD_TYPE="activate_journal"
-      start_osd
-      ;;
-   rgw)
-      start_rgw
-      ;;
-   restapi)
-      start_restapi
-      ;;
-   nfs)
-      start_nfs
-      ;;
-   *)
-      if [ ! -n "$CEPH_DAEMON" ]; then
-          echo "ERROR- One of CEPH_DAEMON or a daemon parameter must be defined as the name "
-          echo "of the daemon you want to deploy."
-          echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI, NFS"
-          echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi, nfs"
-          exit 1
-      fi
-      ;;
+  populate_kvstore)
+    echo "kv store is not supported"
+    ;;
+  mds)
+    start_mds
+    ;;
+  mon)
+    start_mon
+    ;;
+  osd)
+    start_osd
+    ;;
+  osd_directory)
+    OSD_TYPE="directory"
+    start_osd
+    ;;
+  osd_ceph_disk)
+    OSD_TYPE="disk"
+    start_osd
+    ;;
+  osd_ceph_disk_prepare)
+    OSD_TYPE="prepare"
+    start_osd
+    ;;
+  osd_ceph_disk_activate)
+    OSD_TYPE="activate"
+    start_osd
+    ;;
+  osd_ceph_activate_journal)
+    OSD_TYPE="activate_journal"
+    start_osd
+    ;;
+  rgw)
+    start_rgw
+    ;;
+  restapi)
+    start_restapi
+    ;;
+  zap_device)
+    zap_device
+    ;;
+  nfs)
+    start_nfs
+    ;;
+  *)
+  if [ ! -n "$CEPH_DAEMON" ]; then
+    echo "ERROR- One of CEPH_DAEMON or a daemon parameter must be defined as the name "
+    echo "of the daemon you want to deploy."
+    echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI, NFS, ZAP_DEVICE"
+    echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi, nfs, zap_device"
+    exit 1
+  fi
+  ;;
 esac
 
 exit 0
