@@ -9,9 +9,9 @@ ENV container docker
 # This need to be removed later
 RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
 
-RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160617.2/compose/MON/x86_64/os/
-RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160617.2/compose/OSD/x86_64/os/
-RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/Ceph-2-RHEL-7-20160617.2/compose/Tools/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/latest-Ceph-2-RHEL-7/compose/MON/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/latest-Ceph-2-RHEL-7/compose/OSD/x86_64/os/
+RUN yum-config-manager --add=http://download.eng.bos.redhat.com/devel/candidate-trees/latest-Ceph-2-RHEL-7/compose/Tools/x86_64/os/
 RUN yum-config-manager --add=http://pulp.dist.prod.ext.phx2.redhat.com/content/dist/rhel/server/7/7Server/x86_64/os/
 
 
@@ -24,7 +24,7 @@ rm -f /lib/systemd/system/sockets.target.wants/*udev*; \
 rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
 rm -f /lib/systemd/system/basic.target.wants/*;\
 rm -f /lib/systemd/system/anaconda.target.wants/*; \
-yum -y install ceph ceph-mon ceph-osd ceph-mds ceph-radosgw --nogpgcheck; yum clean all
+yum -y install ceph-mon ceph-osd ceph-mds ceph-radosgw --nogpgcheck; yum clean all
 
 # Editing /etc/redhat-storage-server release file
 RUN echo "Red Hat Ceph Storage Server 2.0 (Container)" > /etc/redhat-storage-release
