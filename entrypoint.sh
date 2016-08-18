@@ -25,6 +25,7 @@ set -e
 : ${RGW_REMOTE_CGI:=0}
 : ${RGW_REMOTE_CGI_PORT:=9000}
 : ${RGW_REMOTE_CGI_HOST:=0.0.0.0}
+: ${RGW_USER:="cephnfs"}
 : ${RESTAPI_IP:=0.0.0.0}
 : ${RESTAPI_PORT:=5000}
 : ${RESTAPI_BASE_URL:=/api/v0.1}
@@ -33,8 +34,8 @@ set -e
 : ${KV_TYPE:=none} # valid options: consul, etcd or none
 : ${KV_IP:=127.0.0.1}
 : ${KV_PORT:=4001} # PORT 8500 for Consul
-: ${GANESHA_OPTIONS:="-N NIV_EVENT -L STDOUT"}
-: ${GANESHA_EPOCH:=''} # For restarting
+: ${GANESHA_OPTIONS:=""}
+: ${GANESHA_EPOCH:=""} # For restarting
 
 if [ ! -z "${KV_CA_CERT}" ]; then
 	KV_TLS="--ca-cert=${KV_CA_CERT} --client-cert=${KV_CLIENT_CERT} --client-key=${KV_CLIENT_KEY}"
@@ -616,6 +617,24 @@ function start_rgw {
     /usr/bin/radosgw -d ${CEPH_OPTS} -n client.rgw.${RGW_NAME} -k /var/lib/ceph/radosgw/$RGW_NAME/keyring --rgw-socket-path="" --rgw-zonegroup="$RGW_ZONEGROUP" --rgw-zone="$RGW_ZONE" --rgw-frontends="fastcgi socket_port=$RGW_REMOTE_CGI_PORT socket_host=$RGW_REMOTE_CGI_HOST" --setuser ceph --setgroup ceph
   else
     /usr/bin/radosgw -d ${CEPH_OPTS} -n client.rgw.${RGW_NAME} -k /var/lib/ceph/radosgw/$RGW_NAME/keyring --rgw-socket-path="" --rgw-zonegroup="$RGW_ZONEGROUP" --rgw-zone="$RGW_ZONE" --rgw-frontends="civetweb port=$RGW_CIVETWEB_PORT" --setuser ceph --setgroup ceph
+  fi
+}
+
+function create_rgw_user {
+
+  # Check to see if our RGW has been initialized
+  if [ ! -e /var/lib/ceph/radosgw/keyring ]; then
+    echo "ERROR- /var/lib/ceph/radosgw/keyring must exist. Please get it from your Rados Gateway"
+    exit 1
+  fi
+
+  mkdir -p "/var/lib/ceph/radosgw/${RGW_NAME}"
+  mv /var/lib/ceph/radosgw/keyring /var/lib/ceph/radosgw/${RGW_NAME}/keyring
+
+  if [ -z "${RGW_USER_SECRET_KEY}" ]; then
+    radosgw-admin user create --uid=${RGW_USER} --display-name="RGW ${RGW_USER} User" -c /etc/ceph/${CLUSTER}.conf
+  else
+    radosgw-admin user create --uid=${RGW_USER} --access-key=${RGW_USER_ACCESS_KEY} --secret=${RGW_USER_SECRET_KEY} --display-name="RGW ${RGW_USER} User" -c /etc/ceph/${CLUSTER}.conf
   fi
 }
 
