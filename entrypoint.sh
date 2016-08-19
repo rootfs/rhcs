@@ -776,6 +776,9 @@ case "$CEPH_DAEMON" in
   rgw)
     start_rgw
     ;;
+  rgw_user)
+    create_rgw_user
+    ;;
   restapi)
     start_restapi
     ;;
@@ -792,8 +795,8 @@ case "$CEPH_DAEMON" in
   if [ ! -n "$CEPH_DAEMON" ]; then
     echo "ERROR- One of CEPH_DAEMON or a daemon parameter must be defined as the name "
     echo "of the daemon you want to deploy."
-    echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI, NFS, ZAP_DEVICE, RBD_MIRROR"
-    echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi, nfs, zap_device, rbd_mirror"
+    echo "Valid values for CEPH_DAEMON are MON, OSD, OSD_DIRECTORY, OSD_CEPH_DISK, OSD_CEPH_DISK_PREPARE, OSD_CEPH_DISK_ACTIVATE, OSD_CEPH_ACTIVATE_JOURNAL, MDS, RGW, RESTAPI, NFS, ZAP_DEVICE, RBD_MIRROR, RGW_USER, NFS"
+    echo "Valid values for the daemon parameter are mon, osd, osd_directory, osd_ceph_disk, osd_ceph_disk_prepare, osd_ceph_disk_activate, osd_ceph_activate_journal, mds, rgw, restapi, nfs, zap_device, rbd_mirror, rgw_user, nfs"
     exit 1
   fi
   ;;

@@ -32,7 +32,7 @@ RUN echo "Red Hat Ceph Storage Server 2.0 (Container)" > /etc/redhat-storage-rel
 EXPOSE 6789 6800 6801 6802 6803 6804 6805 80 5000
 
 # Add volumes for Ceph config and data
-VOLUME ["/etc/ceph","/var/lib/ceph"]
+VOLUME ["/etc/ceph","/var/lib/ceph","/etc/ganesha"]
 
 # Add bootstrap script
 ADD entrypoint.sh /entrypoint.sh
